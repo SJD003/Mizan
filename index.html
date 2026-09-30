@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f7f8fc">
+    <meta name="description" content="مَدى، مساحة عربية قريبة لمحادثاتك اليومية.">
+    <meta name="color-scheme" content="light">
+    <title>مَدى — مساحة قريبة</title>
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" href="icons/mada.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="icons/mada.svg">
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="app-header">
+        <a class="brand" href="#" aria-label="مَدى، الصفحة الرئيسية">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 40 40" fill="none"><path d="M8 9.5A5.5 5.5 0 0 1 13.5 4h13A5.5 5.5 0 0 1 32 9.5v13a5.5 5.5 0 0 1-5.5 5.5h-5.1L13 34v-6h-.5A5.5 5.5 0 0 1 7 22.5v-13Z" fill="currentColor"/><circle cx="14" cy="16" r="1.7" fill="white"/><circle cx="20" cy="16" r="1.7" fill="white"/><circle cx="26" cy="16" r="1.7" fill="white"/></svg>
+          </span>
+          <span class="brand-copy"><strong>مَدى</strong><span>مساحة قريبة</span></span>
+        </a>
+        <div class="header-note" id="connectionStatus" role="status" aria-live="polite"><span class="header-note-dot" aria-hidden="true"></span><span id="connectionLabel">نتصل بالخادم...</span></div>
+        <details class="profile-menu" id="profileMenu">
+          <summary class="profile-button" id="profileButton" aria-label="تسجيل الدخول">
+            <span class="avatar avatar-you" id="profileAvatar" aria-hidden="true">م</span><span class="profile-name" id="profileName">دخول</span><span class="profile-chevron" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="profile-popover">
+            <span id="profileEmail"></span>
+            <button type="button" id="logoutButton">تسجيل الخروج</button>
+          </div>
+        </details>
+      </header>
+
+      <main class="workspace" id="workspace" hidden>
+        <aside class="inbox-panel" aria-labelledby="inboxTitle">
+          <div class="inbox-heading">
+            <div><p class="eyebrow">مساحتك</p><h1 id="inboxTitle">المحادثات</h1></div>
+            <button class="icon-button new-chat-button" id="newChatButton" type="button" aria-label="محادثة جديدة" title="محادثة جديدة">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            </button>
+          </div>
+
+          <label class="search-box" for="chatSearch">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/></svg>
+            <input id="chatSearch" type="search" placeholder="ابحث في محادثاتك" autocomplete="off">
+            <kbd aria-hidden="true">⌘ K</kbd>
+          </label>
+
+          <div class="filter-list" role="group" aria-label="تصفية المحادثات">
+            <button class="filter-button is-active" type="button" data-filter="all" aria-pressed="true">الكل <span>٠</span></button>
+            <button class="filter-button" type="button" data-filter="unread" aria-pressed="false">غير مقروءة <span>٠</span></button>
+            <button class="filter-button" type="button" data-filter="groups" aria-pressed="false">مجموعات</button>
+          </div>
+
+          <div class="conversation-list" id="conversationList" aria-label="قائمة المحادثات" aria-live="polite"></div>
+          <div class="empty-search" id="emptySearch">حمّل المحادثات...</div>
+          <div class="inbox-footer"><span class="footer-lock" aria-hidden="true">✳</span><span>محادثاتك محفوظة على هذا الخادم<br><strong>تظهر الرسائل لأعضاء المحادثة.</strong></span></div>
+        </aside>
+
+        <section class="chat-panel" aria-labelledby="chatTitle">
+          <header class="chat-header">
+            <button class="icon-button back-button" id="backButton" type="button" aria-label="العودة إلى المحادثات">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+            </button>
+            <span class="avatar chat-avatar" id="chatAvatar" aria-hidden="true">م</span>
+            <div class="chat-person">
+              <h2 id="chatTitle">ليان السالم</h2>
+              <p id="chatPresence"><span class="online-dot" aria-hidden="true"></span> متصلة الآن</p>
+            </div>
+            <div class="chat-actions">
+              <button class="icon-button" id="chatSearchButton" type="button" aria-label="بحث في المحادثة" title="بحث في المحادثة">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/></svg>
+              </button>
+              <button class="icon-button more-button" id="moreButton" type="button" aria-label="خيارات المحادثة" title="خيارات المحادثة">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>
+              </button>
+            </div>
+          </header>
+
+          <div class="chat-search-panel" id="chatSearchPanel" hidden>
+            <label class="search-box" for="messageSearch"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/></svg><input id="messageSearch" type="search" placeholder="ابحث في هذه المحادثة"><button type="button" id="closeMessageSearch" aria-label="إغلاق البحث">×</button></label>
+          </div>
+          <div class="chat-content">
+            <div class="conversation-intro">
+              <span class="intro-sparkle" aria-hidden="true">✳</span>
+              <p id="conversationIntroTitle">محادثتك الخاصة</p>
+              <span>هذه المحادثة بينك وبين <strong id="introName">الأعضاء</strong>.</span>
+            </div>
+            <div class="date-divider" id="dateDivider" hidden><span id="dateDividerText"></span></div>
+            <div class="message-list" id="messageList" aria-label="رسائل المحادثة" aria-live="polite" aria-relevant="additions"></div>
+            <div class="empty-chat" id="emptyChat" hidden>لا توجد رسائل هنا بعد. ابدأ المحادثة برسالة جديدة.</div>
+            <div class="typing-indicator" id="typingIndicator" hidden><span></span><span></span><span></span><span id="typingLabel">يكتب الآن...</span></div>
+          </div>
+
+          <form class="composer" id="messageForm">
+            <div class="composer-mode" id="composerMode" hidden>
+              <span class="mode-indicator" aria-hidden="true"></span><span id="composerModeText"></span>
+              <button class="mode-dismiss" id="dismissMode" type="button" aria-label="إلغاء نوع الرسالة">×</button>
+            </div>
+            <div class="composer-main">
+              <button class="icon-button record-button" id="recordButton" type="button" aria-label="بدء تسجيل رسالة صوتية" title="بدء تسجيل رسالة صوتية" hidden>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="10" height="13" rx="5"/><path d="M4 11a8 8 0 0 0 16 0m-8 8v2m-4 0h8"/></svg>
+              </button>
+              <button class="icon-button attachment-button" id="attachmentButton" type="button" aria-label="إضافة مرفق" title="إضافة مرفق">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20.5 11.5-8 8a5 5 0 0 1-7-7l8-8a3.5 3.5 0 0 1 5 5l-8 8a2 2 0 0 1-3-3l7-7"/></svg>
+              </button>
+              <input class="sr-only" id="attachmentInput" type="file" accept="image/jpeg,image/png,image/webp,audio/webm,audio/ogg,audio/mp4,audio/mpeg">
+              <label class="message-input-wrap" for="messageInput">
+                <span class="sr-only">اكتب رسالة</span>
+                <textarea id="messageInput" rows="1" placeholder="اكتب رسالة..." maxlength="1000"></textarea>
+                <button class="emoji-button" id="emojiButton" type="button" aria-label="إضافة رمز تعبيري" title="إضافة رمز تعبيري">☺</button>
+              </label>
+              <span class="selected-file" id="selectedFile" hidden></span>
+              <button class="send-button" id="sendButton" type="submit" aria-label="إرسال الرسالة" title="إرسال الرسالة">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 3-7.2 18-3.5-7.3L3 10.2 21 3Z"/><path d="m10.3 13.7 4-4"/></svg>
+              </button>
+            </div>
+            <div class="composer-tools" role="group" aria-label="أنواع الرسائل التجريبية">
+              <span class="tools-label">أرسلها بطريقتك</span>
+              <button class="tool-button is-active" type="button" data-mode="text" aria-pressed="true"><span class="tool-icon text-icon" aria-hidden="true">Aa</span> نص</button>
+              <button class="tool-button" type="button" data-mode="voice" aria-pressed="false"><span class="tool-icon voice-icon" aria-hidden="true"><svg viewBox="0 0 20 20"><rect x="7" y="3" width="6" height="10" rx="3"/><path d="M4.5 9.5a5.5 5.5 0 0 0 11 0M10 15v3m-3 0h6"/></svg></span> صوت</button>
+              <button class="tool-button" type="button" data-mode="moment" aria-pressed="false"><span class="tool-icon moment-icon" aria-hidden="true"><svg viewBox="0 0 20 20"><rect x="2.5" y="3" width="15" height="14" rx="3"/><circle cx="7" cy="8" r="1.5"/><path d="m4 15 4-4 2.5 2.5 2-2 3.5 3.5"/></svg></span> لحظة</button>
+              <button class="tool-button" type="button" data-mode="card" aria-pressed="false"><span class="tool-icon card-icon" aria-hidden="true"><svg viewBox="0 0 20 20"><rect x="3" y="2.5" width="14" height="15" rx="3"/><path d="M6.5 7h7m-7 3h7m-7 3h4"/></svg></span> بطاقة</button>
+            </div>
+            <div class="card-fields" id="cardFields" hidden>
+              <label>عنوان اللقاء<input id="cardTitle" type="text" maxlength="120" placeholder="قهوة نهاية الأسبوع"></label>
+              <label>المكان<input id="cardLocation" type="text" maxlength="180" placeholder="مقهى الحي"></label>
+              <label>الموعد<input id="cardStartsAt" type="datetime-local"></label>
+            </div>
+          </form>
+          <div class="toast" id="toast" role="status" aria-live="polite"></div>
+        </section>
+      </main>
+    </div>
+    <dialog class="app-dialog" id="authDialog" aria-labelledby="authTitle">
+      <form id="authForm">
+        <button class="dialog-close" id="authClose" type="button" aria-label="إغلاق">×</button>
+        <span class="dialog-icon" aria-hidden="true">✳</span>
+        <p class="eyebrow">مرحبًا في مَدى</p>
+        <h2 id="authTitle">أنشئ حسابك</h2>
+        <p class="dialog-copy" id="authDescription">أنشئ حسابًا لمراسلة الأشخاص وحفظ محادثاتك.</p>
+        <label id="displayNameField">اسمك الظاهر<input id="authDisplayName" type="text" maxlength="80" autocomplete="name" required></label>
+        <label id="usernameField">اسم المستخدم<input id="authUsername" type="text" minlength="3" maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9._-]{2,31}" autocomplete="username" required></label>
+        <label>البريد الإلكتروني<input id="authEmail" type="email" maxlength="254" autocomplete="email" required></label>
+        <label>كلمة المرور<input id="authPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label>
+        <p class="form-error" id="authError" role="alert" hidden></p>
+        <button class="dialog-confirm" id="authSubmit" type="submit">إنشاء الحساب</button>
+        <button class="dialog-switch" id="authModeSwitch" type="button">لديك حساب؟ سجّل الدخول</button>
+        <small>كلمة المرور لا تُخزَّن نصًا صريحًا.</small>
+      </form>
+    </dialog>
+    <dialog class="app-dialog new-conversation-dialog" id="newConversationDialog" aria-labelledby="newConversationTitle">
+      <form id="newConversationForm">
+        <button class="dialog-close" id="conversationClose" type="button" aria-label="إغلاق">×</button>
+        <span class="dialog-icon" aria-hidden="true">✉</span>
+        <h2 id="newConversationTitle">محادثة جديدة</h2>
+        <p class="dialog-copy">ابحث باسم المستخدم، واختر شخصًا أو أكثر.</p>
+        <label>ابحث عن أعضاء<input id="memberSearch" type="search" minlength="2" autocomplete="off" placeholder="اكتب اسمًا أو اسم مستخدم"></label>
+        <div class="user-search-results" id="userSearchResults" role="listbox" aria-label="الأشخاص"></div>
+        <label class="group-name-field" id="groupNameField" hidden>اسم المجموعة<input id="groupName" type="text" maxlength="80" placeholder="رفاق الجامعة"></label>
+        <p class="form-error" id="conversationError" role="alert" hidden></p>
+        <button class="dialog-confirm" id="createGroupButton" type="submit" disabled>إنشاء مجموعة</button>
+      </form>
+    </dialog>
+  </body>
+</html>
