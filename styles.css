@@ -220,6 +220,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .app-dialog .dialog-confirm:hover:not(:disabled) { background: var(--purple-dark); }
 .app-dialog .dialog-confirm:disabled { cursor: not-allowed; opacity: .5; }
 .dialog-switch { color: #674bca; background: transparent; border: 0; cursor: pointer; font-size: 11px; }
+.auth-forgot-button { justify-self: start; margin-top: -8px; }
 .app-dialog small { color: #9a9eac; text-align: center; font-size: 9px; }
 .form-error { margin: 0; padding: 8px 10px; color: #a23b45; background: #fff2f0; border-radius: 9px; font-size: 10px; line-height: 1.6; }
 .form-success { margin: 0; padding: 8px 10px; color: #28704f; background: #edf8f1; border-radius: 9px; font-size: 10px; line-height: 1.6; }

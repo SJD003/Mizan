@@ -520,7 +520,7 @@ function setAuthMode(mode) {
   document.querySelector("#authSubmit").textContent = registering
     ? "إنشاء الحساب"
     : requestingReset ? "إرسال التعليمات" : completingReset ? "حفظ كلمة المرور" : "تسجيل الدخول";
-  document.querySelector("#authForgotButton").hidden = mode !== "login";
+  document.querySelector("#authForgotButton").hidden = false;
   document.querySelector("#authModeSwitch").hidden = false;
   document.querySelector("#authModeSwitch").textContent = registering
     ? "لديك حساب؟ سجّل الدخول"
@@ -535,6 +535,10 @@ function setAuthMode(mode) {
 function showAuthNotice(message) {
   authNotice.textContent = message;
   authNotice.hidden = false;
+}
+
+function openPasswordResetForm() {
+  setAuthMode("forgot");
 }
 
 function setCurrentUser(user) {
@@ -1024,7 +1028,7 @@ function bindEvents() {
   document.querySelector("#authModeSwitch").addEventListener("click", () => {
     setAuthMode(authForm.dataset.mode === "register" ? "login" : authForm.dataset.mode === "login" ? "register" : "login");
   });
-  document.querySelector("#authForgotButton").addEventListener("click", () => setAuthMode("forgot"));
+  document.querySelector("#authForgotButton").addEventListener("click", openPasswordResetForm);
   document.querySelector("#authClose").addEventListener("click", () => authDialog.close());
   authForm.addEventListener("submit", (event) => {
     event.preventDefault();
