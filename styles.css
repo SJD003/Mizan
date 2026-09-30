@@ -222,6 +222,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .dialog-switch { color: #674bca; background: transparent; border: 0; cursor: pointer; font-size: 11px; }
 .app-dialog small { color: #9a9eac; text-align: center; font-size: 9px; }
 .form-error { margin: 0; padding: 8px 10px; color: #a23b45; background: #fff2f0; border-radius: 9px; font-size: 10px; line-height: 1.6; }
+.form-success { margin: 0; padding: 8px 10px; color: #28704f; background: #edf8f1; border-radius: 9px; font-size: 10px; line-height: 1.6; }
 .user-search-results { display: grid; gap: 4px; max-height: 220px; overflow: auto; }
 .user-search-result { min-height: 46px; display: flex; align-items: center; gap: 9px; padding: 5px 8px; color: var(--ink); background: #fafaff; border: 1px solid #eeedf6; border-radius: 10px; cursor: pointer; text-align: right; }
 .user-search-result:hover, .user-search-result.is-selected { background: var(--purple-soft); border-color: #ddd5ff; }

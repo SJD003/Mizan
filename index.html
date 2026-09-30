@@ -144,10 +144,12 @@
         <p class="dialog-copy" id="authDescription">أنشئ حسابًا لمراسلة الأشخاص وحفظ محادثاتك.</p>
         <label id="displayNameField">اسمك الظاهر<input id="authDisplayName" type="text" maxlength="80" autocomplete="name" required></label>
         <label id="usernameField">اسم المستخدم<input id="authUsername" type="text" minlength="3" maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9._-]{2,31}" autocomplete="username" required></label>
-        <label>البريد الإلكتروني<input id="authEmail" type="email" maxlength="254" autocomplete="email" required></label>
-        <label>كلمة المرور<input id="authPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label>
+        <label id="authEmailField">البريد الإلكتروني<input id="authEmail" type="email" maxlength="254" autocomplete="email" required></label>
+        <label id="authPasswordField">كلمة المرور<input id="authPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label>
         <p class="form-error" id="authError" role="alert" hidden></p>
+        <p class="form-success" id="authNotice" role="status" aria-live="polite" hidden></p>
         <button class="dialog-confirm" id="authSubmit" type="submit">إنشاء الحساب</button>
+        <button class="dialog-switch" id="authForgotButton" type="button" hidden>نسيت كلمة المرور؟</button>
         <button class="dialog-switch" id="authModeSwitch" type="button">لديك حساب؟ سجّل الدخول</button>
         <small>كلمة المرور لا تُخزَّن نصًا صريحًا.</small>
       </form>

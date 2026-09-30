@@ -8,7 +8,7 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { pbkdf2, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, pbkdf2, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +18,7 @@ const pbkdf2Async = promisify(pbkdf2);
 const projectDirectory = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const passwordIterations = 310_000;
 const sessionLifetimeMs = 7 * 24 * 60 * 60 * 1000;
+const passwordResetLifetimeMs = 30 * 60 * 1000;
 const jsonBodyLimit = 1024 * 1024;
 const uploadLimit = 12 * 1024 * 1024;
 const maximumConversationUploadBytes = 512 * 1024 * 1024;
@@ -191,7 +192,7 @@ function checkedCsrf(request) {
   }
 }
 
-function enforceRateLimit(request, scope, rateLimits) {
+function enforceRateLimit(request, scope, rateLimits, maximum = 10) {
   const key = `${scope}:${request.socket.remoteAddress || "unknown"}`;
   const now = Date.now();
   const current = rateLimits.get(key);
@@ -203,8 +204,69 @@ function enforceRateLimit(request, scope, rateLimits) {
     rateLimits.set(key, { count: 1, resetAt: now + 15 * 60 * 1000 });
     return;
   }
-  if (current.count >= 10) fail(429, "RATE_LIMITED", "محاولات كثيرة. انتظر قليلًا ثم حاول مجددًا.");
+  if (current.count >= maximum) fail(429, "RATE_LIMITED", "محاولات كثيرة. انتظر قليلًا ثم حاول مجددًا.");
   current.count += 1;
+}
+
+function resetDeliveryConfiguration(expectedOrigin, localDevelopment, settings) {
+  const { apiKey, emailFrom, publicUrl } = settings;
+  const hasConfiguration = Boolean(apiKey || emailFrom || publicUrl);
+  if (!hasConfiguration && localDevelopment) return { mode: "console", publicUrl: expectedOrigin };
+  if (!apiKey || !emailFrom || !publicUrl) {
+    fail(
+      503,
+      "PASSWORD_RESET_EMAIL_NOT_CONFIGURED",
+      "إعادة تعيين كلمة المرور غير مهيأة: اضبط MADA_RESEND_API_KEY وMADA_EMAIL_FROM وMADA_PUBLIC_URL.",
+    );
+  }
+
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(publicUrl);
+  } catch {
+    fail(503, "PASSWORD_RESET_EMAIL_NOT_CONFIGURED", "قيمة MADA_PUBLIC_URL غير صالحة.");
+  }
+  const localHost = ["localhost", "127.0.0.1", "[::1]"].includes(parsedUrl.hostname);
+  const validLocalUrl = localDevelopment && parsedUrl.protocol === "http:" && localHost;
+  if (
+    (parsedUrl.protocol !== "https:" && !validLocalUrl)
+    || parsedUrl.username
+    || parsedUrl.password
+    || parsedUrl.pathname !== "/"
+    || parsedUrl.search
+    || parsedUrl.hash
+  ) {
+    fail(503, "PASSWORD_RESET_EMAIL_NOT_CONFIGURED", "يجب أن يكون MADA_PUBLIC_URL عنوان HTTPS عامًا صالحًا.");
+  }
+  return { mode: "resend", apiKey, emailFrom, publicUrl: parsedUrl.origin };
+}
+
+async function deliverPasswordReset(configuration, email, resetUrl) {
+  if (configuration.mode === "console") {
+    console.info(`مَدى: رابط استعادة محلي (للتطوير المحلي فقط، لا تشاركه): ${resetUrl}`);
+    return;
+  }
+  let response;
+  try {
+    response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${configuration.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: configuration.emailFrom,
+        to: [email],
+        subject: "إعادة تعيين كلمة المرور — مَدى",
+        text: `استخدم الرابط التالي لإعادة تعيين كلمة المرور خلال 30 دقيقة:\n${resetUrl}\nإذا لم تطلب ذلك، فتجاهل هذه الرسالة.`,
+        html: `<p>استخدم الرابط التالي لإعادة تعيين كلمة المرور خلال 30 دقيقة:</p><p><a href="${resetUrl}">إعادة تعيين كلمة المرور</a></p><p>إذا لم تطلب ذلك، فتجاهل هذه الرسالة.</p>`,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    fail(503, "PASSWORD_RESET_EMAIL_FAILED", "تعذّر إرسال رسالة الاستعادة. حاول مجددًا لاحقًا.");
+  }
+  if (!response.ok) fail(503, "PASSWORD_RESET_EMAIL_FAILED", "تعذّر إرسال رسالة الاستعادة. تحقق من إعداد البريد ثم حاول مجددًا.");
 }
 
 function publicUser(user) {
@@ -371,6 +433,9 @@ export async function createMadaServer({
   tlsKeyFile = process.env.MADA_TLS_KEY,
 } = {}) {
   const trustCodespacesProxy = process.env.CODESPACES === "true";
+  const localDevelopment = !trustCodespacesProxy
+    && process.env.NODE_ENV !== "production"
+    && ["127.0.0.1", "::1", "localhost"].includes(host);
   if (Boolean(tlsCertificateFile) !== Boolean(tlsKeyFile)) {
     throw new Error("Provide both MADA_TLS_CERT and MADA_TLS_KEY to enable HTTPS.");
   }
@@ -382,6 +447,11 @@ export async function createMadaServer({
     : null;
   const rateLimits = new Map();
   const store = await new JsonStore(resolve(dataDirectory)).open();
+  const resetMailSettings = {
+    apiKey: process.env.MADA_RESEND_API_KEY || "",
+    emailFrom: process.env.MADA_EMAIL_FROM || "",
+    publicUrl: process.env.MADA_PUBLIC_URL || "",
+  };
 
   const handler = async (request, response) => {
     const proxyOrigin = trustCodespacesProxy ? codespacesProxyOrigin(request) : null;
@@ -421,6 +491,94 @@ export async function createMadaServer({
         const token = cookies.get(cookieNames.csrf) || randomBytes(32).toString("base64url");
         if (!cookies.has(cookieNames.csrf)) appendCookies(response, [csrfCookie(token, secure)]);
         sendJson(response, 200, { csrfToken: token });
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/auth/password-reset/request") {
+        checkSameOrigin(request, url, expectedOrigin);
+        checkedCsrf(request);
+        enforceRateLimit(request, "password-reset-ip", rateLimits, 20);
+        const body = await readJson(request);
+        const email = requireString(body.email, "email", 254).toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, "INVALID_EMAIL", "أدخل بريدًا إلكترونيًا صالحًا.");
+        const emailKey = createHash("sha256").update(email).digest("base64url");
+        enforceRateLimit(request, `password-reset-email:${emailKey}`, rateLimits, 5);
+        const delivery = resetDeliveryConfiguration(expectedOrigin, localDevelopment, resetMailSettings);
+        await store.transact((state) => {
+          for (const [hash, reset] of Object.entries(state.passwordResets)) {
+            if (reset.expiresAt <= Date.now()) delete state.passwordResets[hash];
+          }
+        });
+        const user = store.read((state) => Object.values(state.users).find((entry) => entry.email === email));
+        if (user) {
+          const token = randomBytes(32).toString("base64url");
+          const tokenHash = createHash("sha256").update(token).digest("base64url");
+          const createdAt = Date.now();
+          await store.transact((state) => {
+            for (const [hash, reset] of Object.entries(state.passwordResets)) {
+              if (reset.expiresAt <= createdAt || reset.userId === user.id) delete state.passwordResets[hash];
+            }
+            state.passwordResets[tokenHash] = {
+              userId: user.id,
+              createdAt,
+              expiresAt: createdAt + passwordResetLifetimeMs,
+            };
+          });
+
+          const resetUrl = new URL("/", delivery.publicUrl);
+          resetUrl.hash = new URLSearchParams({ reset: token }).toString();
+          try {
+            await deliverPasswordReset(delivery, email, resetUrl.href);
+          } catch (error) {
+            await store.transact((state) => {
+              delete state.passwordResets[tokenHash];
+            });
+            throw error;
+          }
+        }
+        sendJson(response, 202, {
+          ok: true,
+          message: "إذا كان البريد مرتبطًا بحساب، فستصلك تعليمات الاستعادة.",
+        });
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/auth/password-reset/complete") {
+        checkSameOrigin(request, url, expectedOrigin);
+        checkedCsrf(request);
+        enforceRateLimit(request, "password-reset-complete", rateLimits, 10);
+        const body = await readJson(request);
+        if (typeof body.token !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(body.token)) {
+          fail(400, "INVALID_PASSWORD_RESET", "رابط الاستعادة غير صالح أو منتهي الصلاحية.");
+        }
+        const password = validatePassword(body.password);
+        const tokenHash = createHash("sha256").update(body.token).digest("base64url");
+        const result = await store.transact(async (state) => {
+          const reset = state.passwordResets[tokenHash];
+          if (!reset || reset.expiresAt <= Date.now()) {
+            if (reset) delete state.passwordResets[tokenHash];
+            return null;
+          }
+          const user = state.users[reset.userId];
+          if (!user) {
+            delete state.passwordResets[tokenHash];
+            return null;
+          }
+          const passwordSalt = randomBytes(16).toString("base64url");
+          const passwordHash = await pbkdf2Async(password, Buffer.from(passwordSalt, "base64url"), passwordIterations, 32, "sha256");
+          user.passwordSalt = passwordSalt;
+          user.passwordHash = passwordHash.toString("base64url");
+          for (const [hash, entry] of Object.entries(state.passwordResets)) {
+            if (entry.userId === user.id) delete state.passwordResets[hash];
+          }
+          return user.id;
+        });
+        if (!result) fail(400, "INVALID_PASSWORD_RESET", "رابط الاستعادة غير صالح أو منتهي الصلاحية.");
+        for (const [sessionId, session] of sessions) {
+          if (session.userId === result) sessions.delete(sessionId);
+        }
+        appendCookies(response, [sessionCookie("", secure, 0)]);
+        sendJson(response, 200, { ok: true });
         return;
       }
 

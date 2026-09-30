@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -74,12 +75,29 @@ async function makeClient(baseUrl, { origin = baseUrl, defaultHeaders = {} } = {
   };
 }
 
-async function createTestServer({ insideProject = false, codespaces = false } = {}) {
+async function createTestServer({
+  insideProject = false,
+  codespaces = false,
+  production = false,
+  emailConfiguration = {},
+} = {}) {
   const dataDirectory = await mkdtemp(join(insideProject ? projectDirectory : tmpdir(), "mada-api-test-"));
-  const environmentKeys = ["CODESPACES", "MADA_HOST", "HOST", "MADA_TLS_CERT", "MADA_TLS_KEY"];
+  const environmentKeys = [
+    "CODESPACES",
+    "MADA_HOST",
+    "HOST",
+    "MADA_TLS_CERT",
+    "MADA_TLS_KEY",
+    "NODE_ENV",
+    "MADA_RESEND_API_KEY",
+    "MADA_EMAIL_FROM",
+    "MADA_PUBLIC_URL",
+  ];
   const previousEnvironment = new Map(environmentKeys.map((key) => [key, process.env[key]]));
   for (const key of environmentKeys) delete process.env[key];
   if (codespaces) process.env.CODESPACES = "true";
+  if (production) process.env.NODE_ENV = "production";
+  Object.assign(process.env, emailConfiguration);
   let app;
   try {
     app = await createMadaServer({
@@ -517,4 +535,274 @@ test("plain HTTP cannot bind a non-local interface outside Codespaces", async ()
       else process.env[key] = value;
     }
   }
+});
+
+test("password reset is generic, CSRF-protected, single-use, and revokes existing sessions", async (t) => {
+  const app = await createTestServer();
+  t.after(() => app.dispose());
+  const owner = await makeClient(app.baseUrl);
+  await owner.register({
+    email: "reset-owner@example.test",
+    username: "resetowner",
+    displayName: "مالك الحساب",
+  });
+  const secondSession = await makeClient(app.baseUrl);
+  await secondSession.login("reset-owner@example.test");
+
+  const invalidCsrf = await owner.request("/api/auth/password-reset/request", {
+    method: "POST",
+    headers: { "X-CSRF-Token": "invalid" },
+    body: { email: "reset-owner@example.test" },
+  });
+  assert.equal(invalidCsrf.response.status, 403);
+
+  const output = [];
+  const originalInfo = console.info;
+  console.info = (...values) => output.push(values.join(" "));
+  let unknown;
+  let requested;
+  try {
+    unknown = await owner.request("/api/auth/password-reset/request", {
+      method: "POST",
+      body: { email: "missing@example.test" },
+    });
+    requested = await owner.request("/api/auth/password-reset/request", {
+      method: "POST",
+      body: { email: "reset-owner@example.test" },
+    });
+  } finally {
+    console.info = originalInfo;
+  }
+  assert.equal(unknown.response.status, 202);
+  assert.deepEqual(unknown.payload, requested.payload);
+  assert.equal(requested.response.status, 202);
+  assert.equal(output.length, 1);
+  assert.match(output[0], /للتطوير المحلي فقط/);
+
+  const resetUrl = new URL(output[0].match(/https?:\/\/\S+/)[0]);
+  const token = new URLSearchParams(resetUrl.hash.slice(1)).get("reset");
+  assert.match(token, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(JSON.stringify(requested.payload).includes(token), false);
+  const persisted = JSON.parse(await readFile(join(app.dataDirectory, "mada.json"), "utf8"));
+  const [tokenHash] = Object.keys(persisted.passwordResets);
+  assert.equal(tokenHash, createHash("sha256").update(token).digest("base64url"));
+  assert.equal(JSON.stringify(persisted.passwordResets).includes(token), false);
+  assert.equal(persisted.passwordResets[tokenHash].expiresAt - persisted.passwordResets[tokenHash].createdAt, 30 * 60 * 1000);
+
+  const resetCsrfFailure = await owner.request("/api/auth/password-reset/complete", {
+    method: "POST",
+    headers: { "X-CSRF-Token": "invalid" },
+    body: { token, password: "Different-password-52!" },
+  });
+  assert.equal(resetCsrfFailure.response.status, 403);
+  const weakPassword = await owner.request("/api/auth/password-reset/complete", {
+    method: "POST",
+    body: { token, password: "short" },
+  });
+  assert.equal(weakPassword.response.status, 400);
+  assert.equal(weakPassword.payload.error.code, "INVALID_PASSWORD");
+
+  const changed = await owner.request("/api/auth/password-reset/complete", {
+    method: "POST",
+    body: { token, password: "Different-password-52!" },
+  });
+  assert.equal(changed.response.status, 200);
+  assert.deepEqual(changed.payload, { ok: true });
+  assert.equal((await secondSession.request("/api/auth/me")).response.status, 401);
+  const reused = await owner.request("/api/auth/password-reset/complete", {
+    method: "POST",
+    body: { token, password: "Another-password-53!" },
+  });
+  assert.equal(reused.response.status, 400);
+
+  const newLogin = await makeClient(app.baseUrl);
+  const login = await newLogin.login("reset-owner@example.test", "Different-password-52!");
+  assert.equal(login.response.status, 200);
+});
+
+test("expired password reset tokens are removed and cannot change the password", async (t) => {
+  const app = await createTestServer();
+  let currentServer = app;
+  t.after(async () => {
+    await currentServer.close();
+    await rm(app.dataDirectory, { recursive: true, force: true });
+  });
+
+  const client = await makeClient(app.baseUrl);
+  await client.register({
+    email: "expired-reset@example.test",
+    username: "expiredreset",
+    displayName: "حساب منتهي",
+  });
+  const output = [];
+  const originalInfo = console.info;
+  console.info = (...values) => output.push(values.join(" "));
+  try {
+    await client.request("/api/auth/password-reset/request", {
+      method: "POST",
+      body: { email: "expired-reset@example.test" },
+    });
+  } finally {
+    console.info = originalInfo;
+  }
+  const resetUrl = new URL(output[0].match(/https?:\/\/\S+/)[0]);
+  const token = new URLSearchParams(resetUrl.hash.slice(1)).get("reset");
+  await currentServer.close();
+
+  const statePath = join(app.dataDirectory, "mada.json");
+  const state = JSON.parse(await readFile(statePath, "utf8"));
+  const [tokenHash] = Object.keys(state.passwordResets);
+  state.passwordResets[tokenHash].expiresAt = Date.now() - 1;
+  await writeFile(statePath, JSON.stringify(state), "utf8");
+
+  currentServer = await createMadaServer({ dataDirectory: app.dataDirectory, host: "127.0.0.1", port: 0 });
+  const restartedUrl = `http://127.0.0.1:${currentServer.address.port}`;
+  const restartedClient = await makeClient(restartedUrl);
+  const expired = await restartedClient.request("/api/auth/password-reset/complete", {
+    method: "POST",
+    body: { token, password: "Different-password-54!" },
+  });
+  assert.equal(expired.response.status, 400);
+  const afterExpiry = JSON.parse(await readFile(statePath, "utf8"));
+  assert.equal(Object.hasOwn(afterExpiry.passwordResets, tokenHash), false);
+});
+
+test("password reset reports missing production email configuration without creating a token and rate-limits requests", async (t) => {
+  const app = await createTestServer({ production: true });
+  t.after(() => app.dispose());
+  const client = await makeClient(app.baseUrl);
+  await client.register({
+    email: "production-reset@example.test",
+    username: "productionreset",
+    displayName: "مستخدم إنتاج",
+  });
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const result = await client.request("/api/auth/password-reset/request", {
+      method: "POST",
+      body: { email: "production-reset@example.test" },
+    });
+    assert.equal(result.response.status, 503);
+    assert.match(result.payload.error.message, /MADA_RESEND_API_KEY/);
+    assert.equal(JSON.stringify(result.payload).includes("token"), false);
+  }
+  const limited = await client.request("/api/auth/password-reset/request", {
+    method: "POST",
+    body: { email: "production-reset@example.test" },
+  });
+  assert.equal(limited.response.status, 429);
+  const state = JSON.parse(await readFile(join(app.dataDirectory, "mada.json"), "utf8"));
+  assert.deepEqual(state.passwordResets, {});
+});
+
+test("Codespaces password reset fails closed when Resend is not configured", async (t) => {
+  const app = await createTestServer({ codespaces: true });
+  t.after(() => app.dispose());
+  const proxyHost = "mada-3000.app.github.dev";
+  const client = await makeClient(app.baseUrl, {
+    origin: `https://${proxyHost}`,
+    defaultHeaders: {
+      "X-Forwarded-Proto": "https",
+      "X-Forwarded-Host": proxyHost,
+    },
+  });
+  await client.register({
+    email: "configured-later@example.test",
+    username: "configuredlater",
+    displayName: "مستخدم تجريبي",
+  });
+  const result = await client.request("/api/auth/password-reset/request", {
+    method: "POST",
+    body: { email: "configured-later@example.test" },
+  });
+  assert.equal(result.response.status, 503);
+  assert.match(result.payload.error.message, /MADA_RESEND_API_KEY/);
+  const state = JSON.parse(await readFile(join(app.dataDirectory, "mada.json"), "utf8"));
+  assert.deepEqual(state.passwordResets, {});
+  assert.equal(JSON.stringify(result.payload).includes("reset="), false);
+});
+
+test("configured password reset sends a Resend email with a fragment link but never returns its token", async (t) => {
+  const app = await createTestServer({
+    emailConfiguration: {
+      MADA_RESEND_API_KEY: "test-resend-key",
+      MADA_EMAIL_FROM: "Mada Test <mada@example.test>",
+      MADA_PUBLIC_URL: "https://mada.example.test",
+    },
+  });
+  t.after(() => app.dispose());
+  const client = await makeClient(app.baseUrl);
+  await client.register({
+    email: "resend-reset@example.test",
+    username: "resendreset",
+    displayName: "مستخدم البريد",
+  });
+
+  const originalFetch = globalThis.fetch;
+  let sentRequest;
+  globalThis.fetch = async (input, options) => {
+    if (String(input) === "https://api.resend.com/emails") {
+      sentRequest = { input: String(input), options };
+      return new Response(JSON.stringify({ id: "email-test-id" }), { status: 200 });
+    }
+    return originalFetch(input, options);
+  };
+  let result;
+  try {
+    result = await client.request("/api/auth/password-reset/request", {
+      method: "POST",
+      body: { email: "resend-reset@example.test" },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(result.response.status, 202);
+  assert.equal(JSON.stringify(result.payload).includes("reset="), false);
+  assert.equal(sentRequest.input, "https://api.resend.com/emails");
+  assert.equal(sentRequest.options.headers.Authorization, "Bearer test-resend-key");
+  const message = JSON.parse(sentRequest.options.body);
+  assert.deepEqual(message.to, ["resend-reset@example.test"]);
+  assert.match(message.text, /https:\/\/mada\.example\.test\/#reset=[A-Za-z0-9_-]{43}/);
+  assert.match(message.html, /href="https:\/\/mada\.example\.test\/#reset=/);
+  const state = JSON.parse(await readFile(join(app.dataDirectory, "mada.json"), "utf8"));
+  assert.equal(Object.keys(state.passwordResets).length, 1);
+  assert.equal(JSON.stringify(state.passwordResets).includes(message.text.match(/reset=([A-Za-z0-9_-]{43})/)[1]), false);
+});
+
+test("failed Resend delivery removes the pending reset token", async (t) => {
+  const app = await createTestServer({
+    emailConfiguration: {
+      MADA_RESEND_API_KEY: "test-resend-key",
+      MADA_EMAIL_FROM: "Mada Test <mada@example.test>",
+      MADA_PUBLIC_URL: "https://mada.example.test",
+    },
+  });
+  t.after(() => app.dispose());
+  const client = await makeClient(app.baseUrl);
+  await client.register({
+    email: "resend-failure@example.test",
+    username: "resendfailure",
+    displayName: "فشل الإرسال",
+  });
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, options) => {
+    if (String(input) === "https://api.resend.com/emails") {
+      return new Response("provider unavailable", { status: 503 });
+    }
+    return originalFetch(input, options);
+  };
+  let result;
+  try {
+    result = await client.request("/api/auth/password-reset/request", {
+      method: "POST",
+      body: { email: "resend-failure@example.test" },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(result.response.status, 503);
+  assert.equal(JSON.stringify(result.payload).includes("token"), false);
+  const state = JSON.parse(await readFile(join(app.dataDirectory, "mada.json"), "utf8"));
+  assert.deepEqual(state.passwordResets, {});
 });

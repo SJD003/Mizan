@@ -26,6 +26,7 @@ const cardFields = document.querySelector("#cardFields");
 const authDialog = document.querySelector("#authDialog");
 const authForm = document.querySelector("#authForm");
 const authError = document.querySelector("#authError");
+const authNotice = document.querySelector("#authNotice");
 const newConversationDialog = document.querySelector("#newConversationDialog");
 const newConversationForm = document.querySelector("#newConversationForm");
 const userSearchResults = document.querySelector("#userSearchResults");
@@ -42,6 +43,8 @@ class ApiError extends Error {
 }
 
 let csrfToken = "";
+let pendingPasswordResetToken = new URLSearchParams(window.location.hash.slice(1)).get("reset") || "";
+if (pendingPasswordResetToken) window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
 let currentUser = null;
 let conversations = [];
 let selectedConversation = null;
@@ -492,21 +495,46 @@ function showAuthDialog(mode = "register", { allowClose = false } = {}) {
 
 function setAuthMode(mode) {
   const registering = mode === "register";
+  const requestingReset = mode === "forgot";
+  const completingReset = mode === "reset";
   document.querySelector("#displayNameField").hidden = !registering;
   document.querySelector("#authDisplayName").required = registering;
   document.querySelector("#usernameField").hidden = !registering;
   document.querySelector("#authUsername").required = registering;
-  document.querySelector("#authPassword").autocomplete = registering ? "new-password" : "current-password";
-  document.querySelector("#authPassword").minLength = registering ? 12 : 1;
-  document.querySelector("#authTitle").textContent = registering ? "أنشئ حسابك" : "سجّل الدخول";
+  document.querySelector("#authEmailField").hidden = completingReset;
+  document.querySelector("#authEmail").required = !completingReset;
+  document.querySelector("#authPasswordField").hidden = requestingReset;
+  document.querySelector("#authPassword").required = !requestingReset;
+  document.querySelector("#authPassword").autocomplete = registering || completingReset ? "new-password" : "current-password";
+  document.querySelector("#authPassword").minLength = registering || completingReset ? 12 : 1;
+  document.querySelector("#authTitle").textContent = registering
+    ? "أنشئ حسابك"
+    : requestingReset ? "استعادة كلمة المرور" : completingReset ? "اختر كلمة مرور جديدة" : "سجّل الدخول";
   document.querySelector("#authDescription").textContent = registering
     ? "أنشئ حسابًا لمراسلة الأشخاص وحفظ محادثاتك."
-    : "سجّل الدخول لمتابعة محادثاتك.";
-  document.querySelector("#authSubmit").textContent = registering ? "إنشاء الحساب" : "تسجيل الدخول";
-  document.querySelector("#authModeSwitch").textContent = registering ? "لديك حساب؟ سجّل الدخول" : "مستخدم جديد؟ أنشئ حسابًا";
+    : requestingReset
+      ? "أدخل بريدك الإلكتروني. إذا كان مرتبطًا بحساب فستصلك تعليمات الاستعادة."
+      : completingReset
+        ? "يجب أن تتكون كلمة المرور من ١٢ إلى ١٢٨ حرفًا."
+        : "سجّل الدخول لمتابعة محادثاتك.";
+  document.querySelector("#authSubmit").textContent = registering
+    ? "إنشاء الحساب"
+    : requestingReset ? "إرسال التعليمات" : completingReset ? "حفظ كلمة المرور" : "تسجيل الدخول";
+  document.querySelector("#authForgotButton").hidden = mode !== "login";
+  document.querySelector("#authModeSwitch").hidden = false;
+  document.querySelector("#authModeSwitch").textContent = registering
+    ? "لديك حساب؟ سجّل الدخول"
+    : mode === "login" ? "مستخدم جديد؟ أنشئ حسابًا" : "العودة لتسجيل الدخول";
   authError.hidden = true;
   authError.textContent = "";
+  authNotice.hidden = true;
+  authNotice.textContent = "";
   authForm.dataset.mode = mode;
+}
+
+function showAuthNotice(message) {
+  authNotice.textContent = message;
+  authNotice.hidden = false;
 }
 
 function setCurrentUser(user) {
@@ -978,7 +1006,7 @@ function bindEvents() {
     if (!currentUser) {
       event.preventDefault();
       profileMenu.open = false;
-      showAuthDialog("login", { allowClose: true });
+      showAuthDialog(pendingPasswordResetToken ? "reset" : "login", { allowClose: true });
     }
   });
   document.querySelector("#logoutButton").addEventListener("click", safely(async () => {
@@ -994,17 +1022,41 @@ function bindEvents() {
   }));
 
   document.querySelector("#authModeSwitch").addEventListener("click", () => {
-    setAuthMode(authForm.dataset.mode === "register" ? "login" : "register");
+    setAuthMode(authForm.dataset.mode === "register" ? "login" : authForm.dataset.mode === "login" ? "register" : "login");
   });
+  document.querySelector("#authForgotButton").addEventListener("click", () => setAuthMode("forgot"));
   document.querySelector("#authClose").addEventListener("click", () => authDialog.close());
   authForm.addEventListener("submit", (event) => {
     event.preventDefault();
     void (async () => {
-      const registering = authForm.dataset.mode === "register";
+      const mode = authForm.dataset.mode;
+      const registering = mode === "register";
       const submit = document.querySelector("#authSubmit");
       submit.disabled = true;
       authError.hidden = true;
       try {
+        if (mode === "forgot") {
+          const result = await requestApi("/auth/password-reset/request", {
+            method: "POST",
+            body: { email: document.querySelector("#authEmail").value.trim() },
+          });
+          showAuthNotice(result.message);
+          return;
+        }
+        if (mode === "reset") {
+          await requestApi("/auth/password-reset/complete", {
+            method: "POST",
+            body: {
+              token: pendingPasswordResetToken,
+              password: document.querySelector("#authPassword").value,
+            },
+          });
+          pendingPasswordResetToken = "";
+          document.querySelector("#authPassword").value = "";
+          setAuthMode("login");
+          showAuthNotice("تم تغيير كلمة المرور. سجّل الدخول باستخدام كلمة المرور الجديدة.");
+          return;
+        }
         const user = await requestApi(registering ? "/auth/register" : "/auth/login", {
           method: "POST",
           body: {
@@ -1062,6 +1114,12 @@ async function bootstrap() {
     if (health.status !== "ok") throw new ApiError(503, "SERVICE_UNAVAILABLE", "الخادم غير جاهز.");
     const csrf = await requestApi("/auth/csrf");
     csrfToken = csrf.csrfToken;
+    if (pendingPasswordResetToken) {
+      setConnectionStatus(true, "الخادم متصل");
+      workspace.hidden = true;
+      showAuthDialog("reset", { allowClose: true });
+      return;
+    }
     const session = await requestApi("/auth/me");
     await enterWorkspace(session.user);
   } catch (error) {

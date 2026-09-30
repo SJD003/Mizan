@@ -16,6 +16,7 @@ const emptyState = () => ({
   conversations: {},
   messages: {},
   attachments: {},
+  passwordResets: {},
 });
 
 export class JsonStore {
@@ -69,6 +70,10 @@ export class JsonStore {
         || !this.#state.attachments
       ) {
         throw new Error("The Mada database is incompatible or corrupted.");
+      }
+      if (this.#state.passwordResets === undefined) this.#state.passwordResets = {};
+      if (!this.#state.passwordResets || typeof this.#state.passwordResets !== "object" || Array.isArray(this.#state.passwordResets)) {
+        throw new Error("The Mada password reset data is incompatible or corrupted.");
       }
     } catch (error) {
       if (error.code !== "ENOENT") {
