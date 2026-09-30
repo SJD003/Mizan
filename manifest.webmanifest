@@ -1,0 +1,23 @@
+{
+  "id": "./",
+  "name": "مَدى — مساحة قريبة",
+  "short_name": "مَدى",
+  "description": "واجهة عربية تجريبية للمحادثات والرسائل النصية والصوتية واللحظات والبطاقات.",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f7f8fc",
+  "theme_color": "#f7f8fc",
+  "categories": ["social"],
+  "icons": [
+    {
+      "src": "./icons/mada.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

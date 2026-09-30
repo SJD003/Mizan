@@ -1,0 +1,14 @@
+{
+  "name": "مَدى",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm",
+  "postCreateCommand": "npm test",
+  "postStartCommand": "sh -c 'nohup npm start > /tmp/mada-server.log 2>&1 < /dev/null &'",
+  "forwardPorts": [3000],
+  "portsAttributes": {
+    "3000": {
+      "label": "مَدى",
+      "visibility": "private",
+      "onAutoForward": "notify"
+    }
+  }
+}
